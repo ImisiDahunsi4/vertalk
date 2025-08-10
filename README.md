@@ -24,6 +24,35 @@ The `pages/api` directory is mapped to `/api/*`. Files in this directory are tre
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
 
+## Redis Integration Overview
+
+- __Docs__: See `docs/redis-report.md` for architecture, data models, routes, and evaluation.
+- __Modules used__: RedisJSON, RediSearch (full-text + vector/HNSW), Streams, Pub/Sub.
+- __Primary keys__: `company:<id>` (JSON), `kb:<companyId>:...` (HASH+vector), `call:<id>` (JSON), `ticket:<id>` (JSON), `show:<slug>` (JSON).
+- __Real-time__: Pub/Sub channels `ch:call:<id>` and `ch:call:ingest:<companyId>` bridged to SSE via `pages/api/rt/subscribe.ts`. History in Streams `stream:call:<id>` and `stream:call:ingest:<companyId>`.
+- __Search__: `idx:shows` (JSON full-text + sort), `idx:kb` (HASH + HNSW vector). Text queries are sanitized by `sanitizeSearchQuery()`.
+- __Admin__: `pages/admin/index.tsx` is intentionally unauthenticated. Configure active company, ingest knowledge, and reset.
+
+### Quick Start (Redis)
+
+1) Set `REDIS_URL` in `.env` (Redis Cloud recommended).
+
+2) Run dev server:
+
+    ```bash
+    pnpm dev
+    ```
+
+3) Seed shows and search index:
+
+    ```bash
+    curl -X POST http://localhost:3000/api/redis/seed
+    ```
+
+4) Open Admin (no auth by design):
+
+    - http://localhost:3000/admin — configure company, ingest KB, view progress (SSE)
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

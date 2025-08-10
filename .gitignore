@@ -36,3 +36,4 @@ yarn-error.log*
 next-env.d.ts
 .env
 REDIS_INTEGRATION_PLAN.md
+docs/redis-report.md
