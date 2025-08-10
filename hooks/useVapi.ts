@@ -1,6 +1,7 @@
 "use client";
 
 import { assistant } from "@/assistants/assistant";
+import { getFunctionsForVertical } from "@/assistants/verticalFunctions";
 
 import {
   Message,
@@ -35,13 +36,15 @@ async function fetchActiveCompany(): Promise<CompanyDoc | null> {
 
 function buildAssistantFromCompany(base: any, company: CompanyDoc) {
   const enabled = new Set(company.functionsEnabled || []);
-  const baseFns = Array.isArray(base?.model?.functions)
+  const verticalFns = getFunctionsForVertical(company.vertical);
+  const baseFns = Array.isArray(verticalFns) && verticalFns.length > 0
+    ? verticalFns
+    : Array.isArray(base?.model?.functions)
     ? base.model.functions
     : [];
-  const filteredFns =
-    enabled.size === 0
-      ? baseFns
-      : baseFns.filter((f: any) => enabled.has(f?.name));
+  const filteredFns = enabled.size === 0
+    ? baseFns
+    : baseFns.filter((f: any) => enabled.has(f?.name));
 
   const systemPrompt = [
     company.brandVoice
