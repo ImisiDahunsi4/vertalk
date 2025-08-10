@@ -1,6 +1,7 @@
 "use client";
 
 import { assistant } from "@/assistants/assistant";
+import { getFunctionsForVertical } from "@/assistants/verticalFunctions";
 
 import {
   Message,
@@ -11,6 +12,60 @@ import {
 import { useEffect, useState } from "react";
 // import { MessageActionTypeEnum, useMessages } from "./useMessages";
 import { vapi } from "@/lib/vapi.sdk";
+
+type CompanyDoc = {
+  id: string;
+  name: string;
+  vertical: string;
+  brandVoice: string;
+  welcomeMessage: string;
+  functionsEnabled?: string[];
+  domainData?: any;
+};
+
+async function fetchActiveCompany(): Promise<CompanyDoc | null> {
+  try {
+    const res = await fetch("/api/admin/company");
+    if (!res.ok) return null;
+    const json = (await res.json()) as { company: CompanyDoc };
+    return json.company || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildAssistantFromCompany(base: any, company: CompanyDoc) {
+  const enabled = new Set(company.functionsEnabled || []);
+  const verticalFns = getFunctionsForVertical(company.vertical);
+  const baseFns = Array.isArray(verticalFns) && verticalFns.length > 0
+    ? verticalFns
+    : Array.isArray(base?.model?.functions)
+    ? base.model.functions
+    : [];
+  const filteredFns = enabled.size === 0
+    ? baseFns
+    : baseFns.filter((f: any) => enabled.has(f?.name));
+
+  const systemPrompt = [
+    company.brandVoice
+      ? `Act in a ${company.brandVoice} tone.`
+      : undefined,
+    `You're Paula, an AI assistant for ${company.name} (${company.vertical}). Help the user decide and complete their task in this domain.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    ...base,
+    name: `${company.name}-${company.vertical}`,
+    model: {
+      ...base.model,
+      systemPrompt: systemPrompt || base.model?.systemPrompt,
+      functions: filteredFns,
+    },
+    firstMessage: company.welcomeMessage || base.firstMessage,
+  };
+}
 
 export enum CALL_STATUS {
   INACTIVE = "inactive",
@@ -31,6 +86,10 @@ export function useVapi() {
 
   const [audioLevel, setAudioLevel] = useState(0);
 
+  // States for real-time events
+  const [callId, setCallId] = useState<string | null>(null);
+  const [events, setEvents] = useState<any[]>([]);
+
   useEffect(() => {
     const onSpeechStart = () => setIsSpeechActive(true);
     const onSpeechEnd = () => {
@@ -38,14 +97,21 @@ export function useVapi() {
       setIsSpeechActive(false);
     };
 
-    const onCallStartHandler = () => {
-      console.log("Call has started");
+    const onCallStartHandler = (call: any) => {
+      console.log("Call has started", call);
       setCallStatus(CALL_STATUS.ACTIVE);
+      // Vapi provides the call object on start, which has the id.
+      const id = call?.id || call?.sid;
+      if (id) {
+        setCallId(id);
+      }
     };
 
     const onCallEnd = () => {
       console.log("Call has stopped");
       setCallStatus(CALL_STATUS.INACTIVE);
+      setCallId(null); // Clear callId on end
+      setEvents([]); // Clear events on end
     };
 
     const onVolumeLevel = (volume: number) => {
@@ -90,12 +156,56 @@ export function useVapi() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Effect to handle SSE connection based on callId
+  useEffect(() => {
+    if (!callId) return;
+
+    console.log(`Connecting to SSE for callId: ${callId}`);
+    const eventSource = new EventSource(`/api/rt/subscribe?callId=${callId}`);
+
+    eventSource.onmessage = (event) => {
+      // Handle keepalive messages
+      if (event.data.startsWith("keepalive")) return;
+
+      try {
+        const parsed = JSON.parse(event.data);
+        console.log("SSE event received", parsed);
+        setEvents((prev) => [...prev, parsed]);
+      } catch (e) {
+        console.error("Failed to parse SSE event", e);
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error("EventSource error:", err);
+      eventSource.close();
+    };
+
+    // Cleanup on component unmount or callId change
+    return () => {
+      console.log(`Closing SSE for callId: ${callId}`);
+      eventSource.close();
+    };
+  }, [callId]);
+
   const start = async () => {
     setCallStatus(CALL_STATUS.LOADING);
-    const response = vapi.start(assistant);
+    let payload = assistant as any;
+    try {
+      const company = await fetchActiveCompany();
+      if (company) {
+        payload = buildAssistantFromCompany(assistant, company);
+      }
+    } catch {}
+
+    const response = vapi.start(payload);
 
     response.then((res) => {
       console.log("call", res);
+      const id = res?.id || res?.sid;
+      if (id) {
+        setCallId(id);
+      }
     });
   };
 
@@ -118,6 +228,8 @@ export function useVapi() {
     audioLevel,
     activeTranscript,
     messages,
+    events, // Expose events
+    callId, // Expose callId
     start,
     stop,
     toggleCall,
