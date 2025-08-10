@@ -14,6 +14,14 @@ export default function Home() {
         <p className="text-slate-600">
           Talk with Paula to explore upcoming shows and book tickets.
         </p>
+        <div className="mt-4">
+          <a
+            href="/admin"
+            className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+          >
+            Open Admin
+          </a>
+        </div>
       </div>
       <Assistant />
     </main>

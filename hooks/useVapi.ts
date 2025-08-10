@@ -1,6 +1,7 @@
 "use client";
 
 import { assistant } from "@/assistants/assistant";
+import { getFunctionsForVertical } from "@/assistants/verticalFunctions";
 
 import {
   Message,
@@ -11,6 +12,60 @@ import {
 import { useEffect, useState } from "react";
 // import { MessageActionTypeEnum, useMessages } from "./useMessages";
 import { vapi } from "@/lib/vapi.sdk";
+
+type CompanyDoc = {
+  id: string;
+  name: string;
+  vertical: string;
+  brandVoice: string;
+  welcomeMessage: string;
+  functionsEnabled?: string[];
+  domainData?: any;
+};
+
+async function fetchActiveCompany(): Promise<CompanyDoc | null> {
+  try {
+    const res = await fetch("/api/admin/company");
+    if (!res.ok) return null;
+    const json = (await res.json()) as { company: CompanyDoc };
+    return json.company || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildAssistantFromCompany(base: any, company: CompanyDoc) {
+  const enabled = new Set(company.functionsEnabled || []);
+  const verticalFns = getFunctionsForVertical(company.vertical);
+  const baseFns = Array.isArray(verticalFns) && verticalFns.length > 0
+    ? verticalFns
+    : Array.isArray(base?.model?.functions)
+    ? base.model.functions
+    : [];
+  const filteredFns = enabled.size === 0
+    ? baseFns
+    : baseFns.filter((f: any) => enabled.has(f?.name));
+
+  const systemPrompt = [
+    company.brandVoice
+      ? `Act in a ${company.brandVoice} tone.`
+      : undefined,
+    `You're Paula, an AI assistant for ${company.name} (${company.vertical}). Help the user decide and complete their task in this domain.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    ...base,
+    name: `${company.name}-${company.vertical}`,
+    model: {
+      ...base.model,
+      systemPrompt: systemPrompt || base.model?.systemPrompt,
+      functions: filteredFns,
+    },
+    firstMessage: company.welcomeMessage || base.firstMessage,
+  };
+}
 
 export enum CALL_STATUS {
   INACTIVE = "inactive",
@@ -135,7 +190,15 @@ export function useVapi() {
 
   const start = async () => {
     setCallStatus(CALL_STATUS.LOADING);
-    const response = vapi.start(assistant);
+    let payload = assistant as any;
+    try {
+      const company = await fetchActiveCompany();
+      if (company) {
+        payload = buildAssistantFromCompany(assistant, company);
+      }
+    } catch {}
+
+    const response = vapi.start(payload);
 
     response.then((res) => {
       console.log("call", res);
